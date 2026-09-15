@@ -1,0 +1,181 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: #f4f6f9;
+  color: #222;
+}
+
+.page {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 16px 24px 48px;
+}
+
+header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+header h1 {
+  font-size: 22px;
+  margin: 12px 0;
+}
+
+.tag {
+  font-size: 12px;
+  color: #666;
+  border: 1px solid #ccc;
+  border-radius: 10px;
+  padding: 2px 8px;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 10px 0;
+  flex-wrap: wrap;
+}
+
+.toolbar .meta {
+  color: #555;
+  font-size: 13px;
+}
+
+select,
+input {
+  padding: 4px 6px;
+  border: 1px solid #bbb;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+button {
+  padding: 5px 12px;
+  border: 1px solid #1f3b73;
+  background: #1f3b73;
+  color: #fff;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+a {
+  color: #1f3b73;
+}
+
+.panel {
+  background: #fff;
+  border: 1px solid #dde2ea;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin: 12px 0;
+}
+
+.panel h2 {
+  font-size: 16px;
+  margin: 4px 0 10px;
+}
+
+.chart-box {
+  background: #fff;
+  border: 1px solid #dde2ea;
+  border-radius: 8px;
+  padding: 8px;
+  margin: 12px 0;
+}
+
+table.grid {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+table.grid th,
+table.grid td {
+  border: 1px solid #e2e6ee;
+  padding: 6px 8px;
+  text-align: left;
+}
+
+table.grid th {
+  background: #eef1f6;
+}
+
+.row-warn {
+  background: #fff7f0;
+}
+
+.banner {
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin: 8px 0;
+  font-size: 13px;
+}
+
+.banner.info {
+  background: #eef4ff;
+  border: 1px solid #c3d6f5;
+}
+
+.banner.error {
+  background: #fdecea;
+  border: 1px solid #f5c6c0;
+}
+
+.warnings ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.sev-warning {
+  color: #9a5b00;
+}
+
+.sev-error {
+  color: #b3261e;
+}
+
+.sev-info {
+  color: #475569;
+}
+
+.totals {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  border-radius: 6px;
+  padding: 10px 14px;
+  margin: 10px 0;
+  font-size: 14px;
+}
+
+.totals.ok {
+  background: #ecf8ef;
+  border: 1px solid #bfe6c9;
+}
+
+.totals.bad {
+  background: #fdecea;
+  border: 1px solid #f5c6c0;
+}
+
+.warn-text {
+  color: #b3541e;
+  font-size: 12px;
+}
+
+.hint {
+  font-size: 12px;
+  color: #666;
+  margin: 0 0 8px;
+}

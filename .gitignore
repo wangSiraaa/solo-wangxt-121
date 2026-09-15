@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.db
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+node_modules/
+dist/
+.pytest_cache/

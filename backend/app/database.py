@@ -1,0 +1,45 @@
+"""数据库连接。
+
+生产环境可通过 DATABASE_URL 指向 PostgreSQL；也可分别设置
+DB_HOST、DB_PORT、DB_NAME、DB_USER、DB_PASSWORD，避免把凭据写入仓库。
+本地开发/测试缺省使用 SQLite 文件，便于离线运行。
+"""
+from __future__ import annotations
+
+import os
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import DeclarativeBase, sessionmaker
+
+DATABASE_URL = os.getenv("DATABASE_URL")
+if DATABASE_URL is None and os.getenv("DB_HOST"):
+    from sqlalchemy import URL
+
+    DATABASE_URL = str(
+        URL.create(
+            "postgresql+psycopg2",
+            username=os.getenv("DB_USER", "distill"),
+            password=os.environ["DB_PASSWORD"],
+            host=os.environ["DB_HOST"],
+            port=int(os.getenv("DB_PORT", "5432")),
+            database=os.getenv("DB_NAME", "distillation"),
+        )
+    )
+if DATABASE_URL is None:
+    DATABASE_URL = "sqlite:///./distillation.db"
+
+_connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
+engine = create_engine(DATABASE_URL, connect_args=_connect_args)
+SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
