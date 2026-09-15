@@ -1,10 +1,10 @@
-"""分析与方案：插值查询、实时切割分析、方案保存。"""
+"""实时分析：插值查询与切割分析（不落库）。"""
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session
 
-from .. import models, schemas
+from .. import schemas
 from ..database import get_db
 from ..services import assembly
 from ..services.fractions import FractionInput
@@ -57,54 +57,3 @@ def analyze(
     out = result.as_dict()
     out["interpolation"] = assembly.interpolation_meta(assembly.build_curve(exp))
     return out
-
-
-@router.post("/schemes", response_model=schemas.SchemeOut, status_code=201)
-def create_scheme(
-    experiment_id: int,
-    payload: schemas.SchemeIn,
-    db: Session = Depends(get_db),
-):
-    """保存一套切割方案，并返回完整分析。"""
-    exp = load_experiment(db, experiment_id)
-    scheme = models.CutScheme(
-        experiment_id=exp.id,
-        name=payload.name,
-        cuts=[
-            models.SchemeCut(
-                position=i, label=f.label, start_pct=f.start_pct, end_pct=f.end_pct
-            )
-            for i, f in enumerate(payload.fractions)
-        ],
-    )
-    db.add(scheme)
-    db.commit()
-    db.refresh(scheme)
-    return _scheme_out(exp, scheme)
-
-
-@router.get("/schemes", response_model=list[schemas.SchemeOut])
-def list_schemes(experiment_id: int, db: Session = Depends(get_db)):
-    exp = load_experiment(db, experiment_id)
-    schemes = (
-        db.query(models.CutScheme)
-        .options(selectinload(models.CutScheme.cuts))
-        .filter(models.CutScheme.experiment_id == exp.id)
-        .order_by(models.CutScheme.id)
-        .all()
-    )
-    return [_scheme_out(exp, s) for s in schemes]
-
-
-def _scheme_out(exp: models.Experiment, scheme: models.CutScheme) -> schemas.SchemeOut:
-    fractions = [FractionInput(c.label, c.start_pct, c.end_pct) for c in scheme.cuts]
-    analysis = assembly.run_analysis(exp, fractions)
-    return schemas.SchemeOut(
-        id=scheme.id,
-        name=scheme.name,
-        fractions=[
-            schemas.FractionIn(label=c.label, start_pct=c.start_pct, end_pct=c.end_pct)
-            for c in scheme.cuts
-        ],
-        analysis=analysis.as_dict(),
-    )

@@ -2,21 +2,27 @@ const BASE = "/api";
 
 async function request(path, options = {}) {
   const res = await fetch(BASE + path, {
-    headers: { "Content-Type": "application/json" },
     ...options,
+    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
   });
   if (!res.ok) {
+    let body = null;
     let detail = `${res.status}`;
     try {
-      const body = await res.json();
+      body = await res.json();
       detail = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail);
     } catch {
       /* ignore */
     }
-    throw new Error(detail);
+    const err = new Error(detail);
+    err.status = res.status;
+    err.body = body;
+    throw err;
   }
   return res.json();
 }
+
+const idem = (key) => (key ? { "Idempotency-Key": key } : {});
 
 export const api = {
   listExperiments: () => request("/experiments"),
@@ -26,12 +32,34 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ fractions }),
     }),
-  saveScheme: (id, name, fractions) =>
-    request(`/experiments/${id}/schemes`, {
+
+  // 方案与版本
+  listSchemes: (expId) => request(`/experiments/${expId}/schemes`),
+  getScheme: (sid) => request(`/schemes/${sid}`),
+  createScheme: (expId, name, fractions, key) =>
+    request(`/experiments/${expId}/schemes`, {
       method: "POST",
       body: JSON.stringify({ name, fractions }),
+      headers: idem(key),
     }),
-  listSchemes: (id) => request(`/experiments/${id}/schemes`),
-  exportUrl: (id, schemeId, format) =>
-    `${BASE}/experiments/${id}/schemes/${schemeId}/export?format=${format}`,
+  saveDraft: (sid, name, fractions, revision, key) =>
+    request(`/schemes/${sid}/draft`, {
+      method: "PUT",
+      body: JSON.stringify({ name, fractions, base_revision: revision }),
+      headers: idem(key),
+    }),
+  transition: (sid, action, revision, key) =>
+    request(`/schemes/${sid}/${action}`, {
+      method: "POST",
+      body: JSON.stringify({ base_revision: revision }),
+      headers: idem(key),
+    }),
+  getVersion: (vid) => request(`/scheme-versions/${vid}`),
+  copyVersion: (vid, key) =>
+    request(`/scheme-versions/${vid}/copy`, { method: "POST", headers: idem(key) }),
+
+  // 导出
+  exportLiveUrl: (expId, schemeId, format) =>
+    `${BASE}/experiments/${expId}/schemes/${schemeId}/export?format=${format}`,
+  exportVersionUrl: (vid, format) => `${BASE}/scheme-versions/${vid}/export?format=${format}`,
 };

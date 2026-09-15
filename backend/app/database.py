@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -43,3 +43,29 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def ensure_schema() -> None:
+    """建表 + 轻量迁移：为旧版 cut_schemes 补齐版本化列。
+
+    未带版本状态的旧方案回填为可继续编辑的草稿（status=draft, revision=1）。
+    生产环境建议改用 Alembic，本函数保证演示/培训环境平滑升级。
+    """
+    from . import models  # noqa: F401  确保所有表已注册到 metadata
+
+    Base.metadata.create_all(bind=engine)
+    dt_type = "DATETIME" if engine.dialect.name == "sqlite" else "TIMESTAMP"
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        if "cut_schemes" not in insp.get_table_names():
+            return
+        cols = {c["name"] for c in insp.get_columns("cut_schemes")}
+        if "status" not in cols:
+            conn.execute(text("ALTER TABLE cut_schemes ADD COLUMN status VARCHAR(20)"))
+        if "revision" not in cols:
+            conn.execute(text("ALTER TABLE cut_schemes ADD COLUMN revision INTEGER"))
+        if "updated_at" not in cols:
+            conn.execute(text(f"ALTER TABLE cut_schemes ADD COLUMN updated_at {dt_type}"))
+        # 旧数据回填为可继续编辑的旧草稿
+        conn.execute(text("UPDATE cut_schemes SET status='draft' WHERE status IS NULL"))
+        conn.execute(text("UPDATE cut_schemes SET revision=1 WHERE revision IS NULL"))

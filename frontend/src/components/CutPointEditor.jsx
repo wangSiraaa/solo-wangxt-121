@@ -1,4 +1,4 @@
-export default function CutPointEditor({ fractions, onChange }) {
+export default function CutPointEditor({ fractions, onChange, disabled = false }) {
   const update = (i, field, value) => {
     const next = fractions.map((f, j) =>
       j === i ? { ...f, [field]: field === "label" ? value : Number(value) } : f
@@ -14,7 +14,10 @@ export default function CutPointEditor({ fractions, onChange }) {
 
   return (
     <div className="panel">
-      <h2>切点调整（回收率 %）</h2>
+      <h2>
+        切点调整（回收率 %）
+        {disabled && <span className="hint">　待审核状态不可编辑，请先撤回或等待审核完成</span>}
+      </h2>
       <table className="grid">
         <thead>
           <tr>
@@ -28,7 +31,7 @@ export default function CutPointEditor({ fractions, onChange }) {
           {fractions.map((f, i) => (
             <tr key={i} className={f.end_pct <= f.start_pct ? "row-warn" : ""}>
               <td>
-                <input value={f.label} onChange={(e) => update(i, "label", e.target.value)} />
+                <input value={f.label} disabled={disabled} onChange={(e) => update(i, "label", e.target.value)} />
               </td>
               <td>
                 <input
@@ -36,6 +39,7 @@ export default function CutPointEditor({ fractions, onChange }) {
                   step="0.5"
                   min="0"
                   value={f.start_pct}
+                  disabled={disabled}
                   onChange={(e) => update(i, "start_pct", e.target.value)}
                 />
               </td>
@@ -45,11 +49,12 @@ export default function CutPointEditor({ fractions, onChange }) {
                   step="0.5"
                   min="0"
                   value={f.end_pct}
+                  disabled={disabled}
                   onChange={(e) => update(i, "end_pct", e.target.value)}
                 />
               </td>
               <td>
-                <button onClick={() => removeRow(i)} title="删除该馏分">
+                <button onClick={() => removeRow(i)} disabled={disabled} title="删除该馏分">
                   ✕
                 </button>
               </td>
@@ -57,7 +62,7 @@ export default function CutPointEditor({ fractions, onChange }) {
           ))}
         </tbody>
       </table>
-      <button onClick={addRow}>+ 添加馏分</button>
+      <button onClick={addRow} disabled={disabled}>+ 添加馏分</button>
     </div>
   );
 }

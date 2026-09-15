@@ -1,9 +1,9 @@
-"""ORM 模型：试验、曲线点、馏分密度、切割方案。"""
+"""ORM 模型：试验、曲线点、馏分密度、切割方案、版本快照、审计记录。"""
 from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
@@ -11,6 +11,10 @@ from .database import Base
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+# 方案状态机：draft -> pending_review -> published -> withdrawn
+SCHEME_STATUSES = ("draft", "pending_review", "published", "withdrawn")
 
 
 class Experiment(Base):
@@ -75,7 +79,7 @@ class FractionDensity(Base):
 
 
 class CutScheme(Base):
-    """一套馏分切割方案（若干馏分区间）。"""
+    """一套馏分切割方案的工作副本（可变），带状态机与乐观锁。"""
 
     __tablename__ = "cut_schemes"
 
@@ -84,7 +88,13 @@ class CutScheme(Base):
         ForeignKey("experiments.id", ondelete="CASCADE"), index=True
     )
     name: Mapped[str] = mapped_column(String(200), nullable=False)
+    # 旧数据可能为 NULL，代码按 draft / 1 处理，启动迁移会回填
+    status: Mapped[str | None] = mapped_column(String(20), nullable=True, default="draft")
+    revision: Mapped[int | None] = mapped_column(Integer, nullable=True, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime, default=_utcnow, onupdate=_utcnow, nullable=True
+    )
 
     experiment: Mapped[Experiment] = relationship(back_populates="schemes")
     cuts: Mapped[list["SchemeCut"]] = relationship(
@@ -92,10 +102,28 @@ class CutScheme(Base):
         cascade="all, delete-orphan",
         order_by="SchemeCut.position",
     )
+    versions: Mapped[list["SchemeVersion"]] = relationship(
+        back_populates="scheme",
+        cascade="all, delete-orphan",
+        order_by="SchemeVersion.version_no",
+    )
+    audits: Mapped[list["AuditRecord"]] = relationship(
+        back_populates="scheme",
+        cascade="all, delete-orphan",
+        order_by="AuditRecord.id",
+    )
+
+    @property
+    def current_status(self) -> str:
+        return self.status or "draft"
+
+    @property
+    def current_revision(self) -> int:
+        return self.revision or 1
 
 
 class SchemeCut(Base):
-    """方案中的一个馏分区间 [start_pct, end_pct]。"""
+    """方案工作副本中的一个馏分区间 [start_pct, end_pct]。"""
 
     __tablename__ = "scheme_cuts"
 
@@ -109,3 +137,58 @@ class SchemeCut(Base):
     end_pct: Mapped[float] = mapped_column(Float, nullable=False)
 
     scheme: Mapped[CutScheme] = relationship(back_populates="cuts")
+
+
+class SchemeVersion(Base):
+    """发布时生成的不可变版本快照。
+
+    冻结当时的切点、密度、曲线与插值范围、分析结果和完整导出报告；
+    之后修改试验或草稿都不会改写本快照。
+    """
+
+    __tablename__ = "scheme_versions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    scheme_id: Mapped[int] = mapped_column(
+        ForeignKey("cut_schemes.id", ondelete="CASCADE"), index=True
+    )
+    version_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    note: Mapped[str] = mapped_column(String(500), default="")
+    fractions_json: Mapped[list] = mapped_column(JSON, nullable=False)
+    densities_json: Mapped[list] = mapped_column(JSON, nullable=False)
+    curve_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    analysis_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    report_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+    scheme: Mapped[CutScheme] = relationship(back_populates="versions")
+
+
+class AuditRecord(Base):
+    """审计记录：每次状态迁移/保存都留痕。
+
+    idempotency_key 全局唯一：同一客户端请求重复提交时命中已有记录，
+    直接回放当时的响应，不会产生第二条审计记录。
+    """
+
+    __tablename__ = "audit_records"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    scheme_id: Mapped[int] = mapped_column(
+        ForeignKey("cut_schemes.id", ondelete="CASCADE"), index=True
+    )
+    version_id: Mapped[int | None] = mapped_column(
+        ForeignKey("scheme_versions.id", ondelete="SET NULL"), nullable=True
+    )
+    action: Mapped[str] = mapped_column(String(30), nullable=False)
+    from_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    to_status: Mapped[str] = mapped_column(String(20), nullable=False)
+    actor: Mapped[str] = mapped_column(String(100), default="")
+    idempotency_key: Mapped[str | None] = mapped_column(
+        String(120), unique=True, nullable=True
+    )
+    detail_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    response_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+    scheme: Mapped[CutScheme] = relationship(back_populates="audits")

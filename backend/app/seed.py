@@ -8,12 +8,12 @@
 """
 from __future__ import annotations
 
-from .database import Base, SessionLocal, engine
+from .database import SessionLocal, ensure_schema
 from . import models
 
 
 def seed() -> None:
-    Base.metadata.create_all(bind=engine)
+    ensure_schema()
     db = SessionLocal()
     try:
         if db.query(models.Experiment).count() > 0:
@@ -119,10 +119,12 @@ def seed() -> None:
         db.add_all([exp1, exp2, exp3])
         db.flush()
 
-        # 算例2 的配套方案：相邻切点相等（含零宽度馏分）
+        # 算例2 的配套方案：相邻切点相等（含零宽度馏分）—— 保持草稿状态
         scheme = models.CutScheme(
             experiment_id=exp2.id,
             name="算例3b-相邻切点相等方案",
+            status="draft",
+            revision=1,
             cuts=[
                 models.SchemeCut(position=0, label="石脑油", start_pct=0.0, end_pct=20.0),
                 models.SchemeCut(position=1, label="零宽演示", start_pct=20.0, end_pct=20.0),
@@ -132,8 +134,26 @@ def seed() -> None:
             ],
         )
         db.add(scheme)
+        db.flush()
+
+        # 算例2 的四馏分方案：走完整生命周期（草稿→提交→发布），生成 v1 冻结快照
+        from .services.fractions import FractionInput
+        from .services import versioning
+
+        four = [
+            FractionInput("石脑油", 0.0, 20.0),
+            FractionInput("煤油", 20.0, 40.0),
+            FractionInput("柴油", 40.0, 70.0),
+            FractionInput("重油", 70.0, 96.5),
+        ]
+        demo, _ = versioning.create_scheme(
+            db, exp2, name="算例2-四馏分方案（已发布演示）", fractions=four, actor="培训组"
+        )
+        versioning.submit(db, demo, base_revision=1, actor="培训组", note="首次提交")
+        versioning.approve(db, demo, base_revision=2, actor="审核员", note="数据核对无误")
+
         db.commit()
-        print("种子数据已导入：3 个试验 + 1 个方案")
+        print("种子数据已导入：3 个试验 + 2 个方案（含 1 个已发布版本）")
     finally:
         db.close()
 

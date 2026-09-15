@@ -5,35 +5,68 @@ import CutPointEditor from "./components/CutPointEditor.jsx";
 import FractionTable from "./components/FractionTable.jsx";
 import WarningsPanel from "./components/WarningsPanel.jsx";
 import TotalsBar from "./components/TotalsBar.jsx";
+import StatusBadge from "./components/StatusBadge.jsx";
+import VersionTimeline from "./components/VersionTimeline.jsx";
+import VersionView from "./components/VersionView.jsx";
 
 export default function App() {
   const [experiments, setExperiments] = useState([]);
   const [expId, setExpId] = useState(null);
   const [detail, setDetail] = useState(null);
-  const [fractions, setFractions] = useState([]);
-  const [analysis, setAnalysis] = useState(null);
   const [schemes, setSchemes] = useState([]);
-  const [savedSchemeId, setSavedSchemeId] = useState(null);
+  const [schemeDetail, setSchemeDetail] = useState(null);
+  const [fractions, setFractions] = useState([]);
+  const [schemeName, setSchemeName] = useState("新方案");
+  const [analysis, setAnalysis] = useState(null);
+  const [conflict, setConflict] = useState(null);
+  const [versionView, setVersionView] = useState(null);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const timer = useRef(null);
+  // 每个浏览器窗口一个客户端标识：幂等键 = 窗口:方案:动作:修订号
+  const clientId = useRef(crypto.randomUUID());
+  const ikey = (action, sid, rev) => `${clientId.current}:${sid}:${action}:${rev}`;
 
   useEffect(() => {
-    api.listExperiments().then((list) => {
-      setExperiments(list);
-      if (list.length > 0) setExpId(list[0].id);
-    }).catch((e) => setError(e.message));
+    api
+      .listExperiments()
+      .then((list) => {
+        setExperiments(list);
+        if (list.length > 0) setExpId(list[0].id);
+      })
+      .catch((e) => setError(e.message));
   }, []);
+
+  const loadScheme = useCallback(async (sid) => {
+    const d = await api.getScheme(sid);
+    setSchemeDetail(d);
+    setFractions(d.fractions.map((f) => ({ ...f })));
+    setSchemeName(d.name);
+    setConflict(null);
+    setVersionView(null);
+  }, []);
+
+  const reloadSchemes = useCallback(
+    async (selectId) => {
+      const list = await api.listSchemes(expId);
+      setSchemes(list);
+      if (selectId != null) await loadScheme(selectId);
+      return list;
+    },
+    [expId, loadScheme]
+  );
 
   useEffect(() => {
     if (expId == null) return;
-    setSavedSchemeId(null);
+    setSchemeDetail(null);
+    setVersionView(null);
+    setConflict(null);
     Promise.all([api.getExperiment(expId), api.listSchemes(expId)])
-      .then(([d, s]) => {
+      .then(async ([d, list]) => {
         setDetail(d);
-        setSchemes(s);
-        // 默认按密度分段预填切点，便于直接演示
-        if (s.length > 0) {
-          setFractions(s[0].fractions.map((f) => ({ ...f })));
+        setSchemes(list);
+        if (list.length > 0) {
+          await loadScheme(list[0].id);
         } else if (d.densities.length > 0) {
           setFractions(
             d.densities.map((x) => ({
@@ -42,14 +75,15 @@ export default function App() {
               end_pct: x.end_pct,
             }))
           );
+          setSchemeName("新方案");
         } else {
           setFractions([]);
         }
       })
       .catch((e) => setError(e.message));
-  }, [expId]);
+  }, [expId, loadScheme]);
 
-  // 切点变化后防抖调用实时分析
+  // 切点变化后防抖调用实时分析（不保存）
   useEffect(() => {
     if (expId == null || fractions.length === 0) {
       setAnalysis(null);
@@ -57,35 +91,87 @@ export default function App() {
     }
     clearTimeout(timer.current);
     timer.current = setTimeout(() => {
-      api
-        .analyze(expId, fractions)
-        .then(setAnalysis)
-        .catch((e) => setError(e.message));
+      api.analyze(expId, fractions).then(setAnalysis).catch((e) => setError(e.message));
     }, 250);
     return () => clearTimeout(timer.current);
   }, [expId, fractions]);
 
-  const saveScheme = useCallback(() => {
-    const name = window.prompt("方案名称", `方案-${new Date().toLocaleString()}`);
-    if (!name) return;
-    api
-      .saveScheme(expId, name, fractions)
-      .then((s) => {
-        setSavedSchemeId(s.id);
-        return api.listSchemes(expId).then(setSchemes);
-      })
-      .catch((e) => setError(e.message));
-  }, [expId, fractions]);
+  const handleErr = useCallback((e) => {
+    if (e.status === 409) {
+      setConflict(e.message); // 可见冲突提示，不覆盖
+    } else {
+      setError(e.message);
+    }
+  }, []);
+
+  const run = useCallback(
+    async (fn) => {
+      setBusy(true);
+      try {
+        await fn();
+      } catch (e) {
+        handleErr(e);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [handleErr]
+  );
+
+  const save = () =>
+    run(async () => {
+      if (schemeDetail) {
+        const s = await api.saveDraft(
+          schemeDetail.id,
+          schemeName,
+          fractions,
+          schemeDetail.revision,
+          ikey("save", schemeDetail.id, schemeDetail.revision)
+        );
+        await reloadSchemes(s.id);
+      } else {
+        const s = await api.createScheme(
+          expId,
+          schemeName || "新方案",
+          fractions,
+          ikey("create", expId, schemeName)
+        );
+        await reloadSchemes(s.id);
+      }
+    });
+
+  const doTransition = (action) =>
+    run(async () => {
+      await api.transition(
+        schemeDetail.id,
+        action,
+        schemeDetail.revision,
+        ikey(action, schemeDetail.id, schemeDetail.revision)
+      );
+      await reloadSchemes(schemeDetail.id);
+    });
+
+  const openVersion = (vid) =>
+    run(async () => setVersionView(await api.getVersion(vid)));
+
+  const copyVersion = (vid) =>
+    run(async () => {
+      const s = await api.copyVersion(vid, ikey("copy", vid, 0));
+      await reloadSchemes(s.id);
+    });
 
   if (error) {
     return (
       <div className="page">
-        <div className="banner error">出错：{error}
-          <button onClick={() => setError(null)}>关闭</button>
+        <div className="banner error">
+          出错：{error} <button onClick={() => setError(null)}>关闭</button>
         </div>
       </div>
     );
   }
+
+  const status = schemeDetail?.status ?? "draft";
+  const editable = status !== "pending_review";
 
   return (
     <div className="page">
@@ -135,42 +221,95 @@ export default function App() {
             recoveredPct={analysis?.recovered_pct}
           />
 
-          <div className="toolbar">
-            <button onClick={saveScheme} disabled={fractions.length === 0}>
-              保存方案
-            </button>
-            {savedSchemeId && (
+          {/* 方案状态栏 */}
+          <div className="panel scheme-bar">
+            <label>
+              方案：
+              <select
+                value={schemeDetail?.id ?? ""}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === "new") {
+                    setSchemeDetail(null);
+                    setSchemeName("新方案");
+                    setVersionView(null);
+                  } else {
+                    loadScheme(Number(v));
+                  }
+                }}
+              >
+                {schemes.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}（{s.version_count} 个版本）
+                  </option>
+                ))}
+                <option value="new">＋ 新建方案…</option>
+              </select>
+            </label>
+            <input
+              className="scheme-name"
+              value={schemeName}
+              disabled={!editable}
+              onChange={(e) => setSchemeName(e.target.value)}
+            />
+            {schemeDetail && (
               <>
-                <a href={api.exportUrl(expId, savedSchemeId, "json")} target="_blank" rel="noreferrer">
-                  导出 JSON
-                </a>
-                <a href={api.exportUrl(expId, savedSchemeId, "csv")} target="_blank" rel="noreferrer">
-                  导出 CSV
-                </a>
+                <StatusBadge status={status} />
+                <span className="meta">r{schemeDetail.revision}</span>
               </>
             )}
-            {schemes.length > 0 && (
-              <label>
-                载入已存方案：
-                <select
-                  value=""
-                  onChange={(e) => {
-                    const s = schemes.find((x) => x.id === Number(e.target.value));
-                    if (s) setFractions(s.fractions.map((f) => ({ ...f })));
-                  }}
-                >
-                  <option value="">选择…</option>
-                  {schemes.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+            <span className="spacer" />
+            <button disabled={busy || !editable || fractions.length === 0} onClick={save}>
+              保存草稿
+            </button>
+            {schemeDetail && status === "draft" && (
+              <button disabled={busy} onClick={() => doTransition("submit")}>
+                提交审核
+              </button>
+            )}
+            {schemeDetail && status === "pending_review" && (
+              <>
+                <button disabled={busy} onClick={() => doTransition("approve")}>
+                  审核通过（发布）
+                </button>
+                <button disabled={busy} className="secondary" onClick={() => doTransition("withdraw")}>
+                  撤回
+                </button>
+              </>
+            )}
+            {schemeDetail && status === "published" && (
+              <button disabled={busy} className="secondary" onClick={() => doTransition("withdraw")}>
+                撤回发布
+              </button>
+            )}
+            {schemeDetail && (
+              <span className="meta">
+                实时导出（未冻结）：
+                <a href={api.exportLiveUrl(expId, schemeDetail.id, "json")} target="_blank" rel="noreferrer">
+                  JSON
+                </a>
+                {" / "}
+                <a href={api.exportLiveUrl(expId, schemeDetail.id, "csv")} target="_blank" rel="noreferrer">
+                  CSV
+                </a>
+              </span>
             )}
           </div>
 
-          <CutPointEditor fractions={fractions} onChange={setFractions} />
+          {conflict && (
+            <div className="banner conflict">
+              <strong>版本冲突：</strong>
+              {conflict}
+              <button onClick={() => schemeDetail && loadScheme(schemeDetail.id)}>
+                载入最新版本
+              </button>
+              <button className="secondary" onClick={() => setConflict(null)}>
+                忽略
+              </button>
+            </div>
+          )}
+
+          <CutPointEditor fractions={fractions} onChange={setFractions} disabled={!editable} />
 
           {analysis && (
             <>
@@ -181,6 +320,16 @@ export default function App() {
               />
               <FractionTable analysis={analysis} />
             </>
+          )}
+
+          {schemeDetail && <VersionTimeline detail={schemeDetail} onOpenVersion={openVersion} />}
+
+          {versionView && (
+            <VersionView
+              version={versionView}
+              onClose={() => setVersionView(null)}
+              onCopy={copyVersion}
+            />
           )}
         </>
       )}

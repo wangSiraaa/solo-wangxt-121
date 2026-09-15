@@ -92,5 +92,72 @@ class ExperimentDetail(BaseModel):
 class SchemeOut(BaseModel):
     id: int
     name: str
+    status: str
+    revision: int
     fractions: list[FractionIn]
     analysis: dict
+
+
+class SchemeSummary(BaseModel):
+    id: int
+    name: str
+    status: str
+    revision: int
+    version_count: int
+    updated_at: str | None
+
+
+class DraftSaveIn(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    fractions: list[FractionIn] = Field(min_length=1)
+    base_revision: int = Field(ge=1)
+
+
+class TransitionIn(BaseModel):
+    base_revision: int = Field(ge=1)
+    note: str = ""
+
+
+class VersionSummaryOut(BaseModel):
+    id: int
+    version_no: int
+    note: str
+    created_at: str
+
+
+class AuditOut(BaseModel):
+    id: int
+    action: str
+    action_label: str
+    from_status: str | None
+    to_status: str
+    actor: str
+    version_id: int | None
+    detail: dict
+    created_at: str
+
+
+class SchemeDetailOut(BaseModel):
+    id: int
+    experiment_id: int
+    name: str
+    status: str
+    revision: int
+    fractions: list[FractionIn]
+    analysis: dict
+    versions: list[VersionSummaryOut]
+    audits: list[AuditOut]
+    created_at: str
+    updated_at: str | None
+
+
+class VersionDetailOut(BaseModel):
+    id: int
+    scheme_id: int
+    version_no: int
+    note: str
+    fractions: list[FractionIn]
+    densities: list[FractionDensityIn]
+    curve: dict
+    analysis: dict
+    created_at: str
