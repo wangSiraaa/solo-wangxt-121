@@ -8,6 +8,7 @@ import TotalsBar from "./components/TotalsBar.jsx";
 import StatusBadge from "./components/StatusBadge.jsx";
 import VersionTimeline from "./components/VersionTimeline.jsx";
 import VersionView from "./components/VersionView.jsx";
+import DiffView from "./components/DiffView.jsx";
 
 export default function App() {
   const [experiments, setExperiments] = useState([]);
@@ -20,6 +21,7 @@ export default function App() {
   const [analysis, setAnalysis] = useState(null);
   const [conflict, setConflict] = useState(null);
   const [versionView, setVersionView] = useState(null);
+  const [diffPair, setDiffPair] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const timer = useRef(null);
@@ -44,6 +46,7 @@ export default function App() {
     setSchemeName(d.name);
     setConflict(null);
     setVersionView(null);
+    setDiffPair(null);
   }, []);
 
   const reloadSchemes = useCallback(
@@ -142,14 +145,57 @@ export default function App() {
 
   const doTransition = (action) =>
     run(async () => {
-      await api.transition(
-        schemeDetail.id,
-        action,
-        schemeDetail.revision,
-        ikey(action, schemeDetail.id, schemeDetail.revision)
-      );
+      try {
+        await api.transition(
+          schemeDetail.id,
+          action,
+          schemeDetail.revision,
+          ikey(action, schemeDetail.id, schemeDetail.revision)
+        );
+      } catch (e) {
+        // 撤回已发布方案且存在生效指针：按规则要求显式选择继任历史版本
+        if (
+          action === "withdraw" &&
+          e.status === 409 &&
+          e.body?.code === "ACTIVE_VERSION_REQUIRES_SUCCESSOR" &&
+          (e.body.available_versions ?? []).length > 0
+        ) {
+          const options = e.body.available_versions;
+          const pick = window.prompt(
+            `${e.body.detail}\n可选继任版本：${options
+              .map((v) => `v${v.version_no}`)
+              .join("、")}\n请输入要生效的版本号（数字）：`
+          );
+          const chosen = options.find((v) => String(v.version_no) === (pick ?? "").trim());
+          if (!chosen) throw e;
+          await api.transition(
+            schemeDetail.id,
+            action,
+            schemeDetail.revision,
+            ikey(`${action}-succ${chosen.id}`, schemeDetail.id, schemeDetail.revision),
+            { successor_version_id: chosen.id }
+          );
+        } else {
+          throw e;
+        }
+      }
       await reloadSchemes(schemeDetail.id);
     });
+
+  const switchVersion = (targetId) =>
+    run(async () => {
+      await api.switchVersion(
+        schemeDetail.id,
+        targetId,
+        schemeDetail.active_version_id,
+        schemeDetail.revision,
+        ikey("switch", schemeDetail.id, schemeDetail.revision)
+      );
+      await reloadSchemes(schemeDetail.id);
+      setVersionView(null);
+    });
+
+  const compareVersions = (fromId, toId) => setDiffPair({ from: fromId, to: toId });
 
   const openVersion = (vid) =>
     run(async () => setVersionView(await api.getVersion(vid)));
@@ -256,6 +302,11 @@ export default function App() {
               <>
                 <StatusBadge status={status} />
                 <span className="meta">r{schemeDetail.revision}</span>
+                {schemeDetail.active_version_no != null && (
+                  <span className="badge st-published">
+                    生效 v{schemeDetail.active_version_no}
+                  </span>
+                )}
               </>
             )}
             <span className="spacer" />
@@ -327,8 +378,23 @@ export default function App() {
           {versionView && (
             <VersionView
               version={versionView}
+              isActive={versionView.id === schemeDetail?.active_version_id}
+              onSwitch={() => switchVersion(versionView.id)}
+              onCompare={() =>
+                compareVersions(versionView.id, schemeDetail.active_version_id)
+              }
               onClose={() => setVersionView(null)}
               onCopy={copyVersion}
+            />
+          )}
+
+          {diffPair && schemeDetail && (
+            <DiffView
+              schemeId={schemeDetail.id}
+              versions={schemeDetail.versions}
+              fromId={diffPair.from}
+              toId={diffPair.to}
+              onClose={() => setDiffPair(null)}
             />
           )}
         </>

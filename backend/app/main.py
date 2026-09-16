@@ -42,11 +42,7 @@ app.add_middleware(
 async def conflict_handler(request: Request, exc: ConflictError):
     return JSONResponse(
         status_code=409,
-        content={
-            "detail": str(exc),
-            "code": "REVISION_CONFLICT",
-            "current_revision": exc.current_revision,
-        },
+        content={"detail": str(exc), "code": exc.code, **exc.payload},
     )
 
 

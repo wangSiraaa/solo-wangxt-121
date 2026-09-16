@@ -118,6 +118,21 @@ class TransitionIn(BaseModel):
     note: str = ""
 
 
+class WithdrawIn(BaseModel):
+    base_revision: int = Field(ge=1)
+    note: str = ""
+    successor_version_id: int | None = None
+
+
+class SwitchIn(BaseModel):
+    """受控切换：必须携带当前生效版本与修订号。"""
+
+    target_version_id: int
+    expected_active_version_id: int | None = None
+    base_revision: int = Field(ge=1)
+    note: str = ""
+
+
 class VersionSummaryOut(BaseModel):
     id: int
     version_no: int
@@ -143,6 +158,8 @@ class SchemeDetailOut(BaseModel):
     name: str
     status: str
     revision: int
+    active_version_id: int | None
+    active_version_no: int | None
     fractions: list[FractionIn]
     analysis: dict
     versions: list[VersionSummaryOut]

@@ -275,15 +275,19 @@ def test_invalid_transitions_rejected(client, exp_id):
     assert r.status_code == 200
 
 
-def test_withdraw_published_keeps_version(client, exp_id):
+def test_withdraw_published_requires_successor(client, exp_id):
+    """撤回唯一生效版本：按明确规则拒绝，生效指针不丢失。"""
     state, vid = publish(client, exp_id)
     r = transition(client, state["id"], "withdraw", state["revision"])
-    assert r.json()["status"] == "withdrawn"
-    # 已撤回后版本快照仍可只读查询
+    assert r.status_code == 409
+    assert r.json()["code"] == "ACTIVE_VERSION_REQUIRES_SUCCESSOR"
+    assert r.json()["available_versions"] == []
+    # 生效指针保留，快照仍可只读查询
+    detail = client.get(f"/api/schemes/{state['id']}").json()
+    assert detail["status"] == "published"
+    assert detail["active_version_id"] == vid
     rep = client.get(f"/api/scheme-versions/{vid}/export?format=json").json()
     assert rep["frozen"] is True
-    detail = client.get(f"/api/schemes/{state['id']}").json()
-    assert len(detail["versions"]) == 1
 
 
 def test_copy_from_version_creates_new_draft(client, exp_id):

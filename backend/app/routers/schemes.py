@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, selectinload
 from .. import models, schemas
 from ..database import get_db
 from ..services import assembly, versioning
+from ..services.diff import diff_versions
 from ..services.fractions import FractionInput
 from ..services.versioning import ACTION_LABELS
 from .experiments import load_experiment
@@ -51,6 +52,7 @@ def _state_dict(scheme: models.CutScheme) -> dict:
         "name": scheme.name,
         "status": scheme.current_status,
         "revision": scheme.current_revision,
+        "active_version_id": scheme.active_version_id,
         "fractions": [
             {"label": c.label, "start_pct": c.start_pct, "end_pct": c.end_pct}
             for c in scheme.cuts
@@ -131,8 +133,12 @@ def get_scheme(scheme_id: int, db: Session = Depends(get_db)):
         .all()
     )
     state = _state_dict(scheme)
+    active = next(
+        (v for v in scheme.versions if v.id == scheme.active_version_id), None
+    )
     return schemas.SchemeDetailOut(
         **state,
+        active_version_no=active.version_no if active else None,
         versions=[
             schemas.VersionSummaryOut(
                 id=v.id, version_no=v.version_no, note=v.note,
@@ -228,7 +234,7 @@ def approve_scheme(
 @router.post("/schemes/{scheme_id}/withdraw")
 def withdraw_scheme(
     scheme_id: int,
-    payload: schemas.TransitionIn,
+    payload: schemas.WithdrawIn,
     db: Session = Depends(get_db),
     idempotency_key: str | None = Header(default=None),
     x_actor: str = Header(default=""),
@@ -238,16 +244,82 @@ def withdraw_scheme(
         return replay
     scheme = load_scheme(db, scheme_id)
     scheme, audit = versioning.withdraw(
-        db, scheme, base_revision=payload.base_revision, actor=x_actor,
-        idempotency_key=idempotency_key, note=payload.note,
+        db, scheme, base_revision=payload.base_revision,
+        successor_version_id=payload.successor_version_id,
+        actor=x_actor, idempotency_key=idempotency_key, note=payload.note,
     )
     return _finish(db, audit, _state_dict(scheme))
+
+
+@router.post("/schemes/{scheme_id}/switch-version")
+def switch_version(
+    scheme_id: int,
+    payload: schemas.SwitchIn,
+    db: Session = Depends(get_db),
+    idempotency_key: str | None = Header(default=None),
+    x_actor: str = Header(default=""),
+):
+    """受控切换当前生效版本：只移动指针并写新审计，不改写历史快照。"""
+    replay = _replay(db, idempotency_key)
+    if replay is not None:
+        return replay
+    scheme = load_scheme(db, scheme_id)
+    target = (
+        db.query(models.SchemeVersion)
+        .filter(models.SchemeVersion.id == payload.target_version_id)
+        .first()
+    )
+    if target is None or target.scheme_id != scheme.id:
+        raise HTTPException(status_code=404, detail="目标版本不存在或不属于该方案")
+    scheme, audit, changed = versioning.switch_active_version(
+        db, scheme, target=target,
+        expected_active_version_id=payload.expected_active_version_id,
+        base_revision=payload.base_revision,
+        actor=x_actor, idempotency_key=idempotency_key, note=payload.note,
+    )
+    out = _state_dict(scheme)
+    out["changed"] = changed
+    out["active_version_no"] = target.version_no
+    if audit is None:
+        # 幂等空操作（目标已是生效版本）：直接提交并返回，不写审计
+        db.commit()
+        return JSONResponse(content=out, status_code=200)
+    return _finish(db, audit, out)
+
+
+@router.get("/schemes/{scheme_id}/current-version")
+def current_version(scheme_id: int, db: Session = Depends(get_db)):
+    """查询当前生效发布版本（可能为 null）。"""
+    scheme = load_scheme(db, scheme_id)
+    if scheme.active_version_id is None:
+        return {"scheme_id": scheme.id, "version": None}
+    v = _load_version(db, scheme.active_version_id)
+    return {"scheme_id": scheme.id, "version": _version_detail(v)}
+
+
+@router.get("/schemes/{scheme_id}/diff")
+def diff_scheme_versions(
+    scheme_id: int,
+    from_id: int,
+    to_id: int,
+    db: Session = Depends(get_db),
+):
+    """两版本间只读差异：切点/密度/插值范围/产率。"""
+    scheme = load_scheme(db, scheme_id)
+    v_from = _load_version(db, from_id)
+    v_to = _load_version(db, to_id)
+    if v_from.scheme_id != scheme.id or v_to.scheme_id != scheme.id:
+        raise HTTPException(status_code=404, detail="版本不属于该方案")
+    return diff_versions(v_from, v_to)
 
 
 # ---- 版本查询与复制 -------------------------------------------------------
 @router.get("/scheme-versions/{version_id}", response_model=schemas.VersionDetailOut)
 def get_version(version_id: int, db: Session = Depends(get_db)):
-    v = _load_version(db, version_id)
+    return _version_detail(_load_version(db, version_id))
+
+
+def _version_detail(v: models.SchemeVersion) -> schemas.VersionDetailOut:
     return schemas.VersionDetailOut(
         id=v.id,
         scheme_id=v.scheme_id,

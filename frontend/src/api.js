@@ -48,12 +48,25 @@ export const api = {
       body: JSON.stringify({ name, fractions, base_revision: revision }),
       headers: idem(key),
     }),
-  transition: (sid, action, revision, key) =>
+  transition: (sid, action, revision, key, extra = {}) =>
     request(`/schemes/${sid}/${action}`, {
       method: "POST",
-      body: JSON.stringify({ base_revision: revision }),
+      body: JSON.stringify({ base_revision: revision, ...extra }),
       headers: idem(key),
     }),
+  switchVersion: (sid, target, expectedActive, revision, key) =>
+    request(`/schemes/${sid}/switch-version`, {
+      method: "POST",
+      body: JSON.stringify({
+        target_version_id: target,
+        expected_active_version_id: expectedActive,
+        base_revision: revision,
+      }),
+      headers: idem(key),
+    }),
+  getCurrentVersion: (sid) => request(`/schemes/${sid}/current-version`),
+  getDiff: (sid, fromId, toId) =>
+    request(`/schemes/${sid}/diff?from_id=${fromId}&to_id=${toId}`),
   getVersion: (vid) => request(`/scheme-versions/${vid}`),
   copyVersion: (vid, key) =>
     request(`/scheme-versions/${vid}/copy`, { method: "POST", headers: idem(key) }),

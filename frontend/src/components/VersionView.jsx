@@ -3,7 +3,7 @@ import { api } from "../api.js";
 const fmt = (v, digits = 2) => (v == null ? "—" : Number(v).toFixed(digits));
 
 /** 只读历史版本视图：冻结的切点、密度、插值范围与导出。 */
-export default function VersionView({ version, onClose, onCopy }) {
+export default function VersionView({ version, isActive, onClose, onCopy, onSwitch, onCompare }) {
   if (!version) return null;
   const rng = version.curve?.interpolation?.applicable_range;
   return (
@@ -11,6 +11,7 @@ export default function VersionView({ version, onClose, onCopy }) {
       <h2>
         历史版本 v{version.version_no}（只读快照，发布于{" "}
         {new Date(version.created_at).toLocaleString()}）
+        {isActive && <span className="badge st-published">　当前生效</span>}
       </h2>
       <div className="banner info">
         插值：{version.curve?.interpolation?.method} ｜ 适用范围：回收率{" "}
@@ -58,6 +59,12 @@ export default function VersionView({ version, onClose, onCopy }) {
         <a href={api.exportVersionUrl(version.id, "csv")} target="_blank" rel="noreferrer">
           导出冻结 CSV
         </a>
+        {!isActive && (
+          <button onClick={() => onSwitch(version.id)}>切换为生效版本</button>
+        )}
+        <button className="secondary" onClick={() => onCompare(version.id)}>
+          与生效版本比较
+        </button>
         <button onClick={() => onCopy(version.id)}>基于此版本新建草稿</button>
         <button className="secondary" onClick={onClose}>
           关闭

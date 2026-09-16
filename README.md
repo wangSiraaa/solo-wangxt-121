@@ -38,6 +38,20 @@ draft / published / withdrawn --save_draft--> draft   （工作副本可继续�
 绝不重新计算；工作副本导出（`/api/experiments/{eid}/schemes/{sid}/export`）
 仍是实时计算并标注"未冻结"。
 
+**当前生效版本**：同一方案可保留多个已发布快照，但只有一个生效版本
+（`cut_schemes.active_version_id`，普通整型指针，避免与版本表外键形成循环依赖，
+完整性由应用层保证）。新发布版本自动生效；`POST /api/schemes/{sid}/switch-version`
+受控切换到历史版本 —— 只移动指针并写新审计事件，不改写任何旧快照、旧报告或
+原审核记录。切换请求必须携带 `expected_active_version_id` 与 `base_revision`，
+乱序/过期返回 `409 ACTIVE_VERSION_CONFLICT / REVISION_CONFLICT`；目标已是生效
+版本时为幂等空操作（不写审计）。撤回已发布方案时若生效指针存在，必须显式指定
+继任历史版本（`successor_version_id`，切换+撤回同一事务原子完成），否则
+`409 ACTIVE_VERSION_REQUIRES_SUCCESSOR` —— 绝不静默丢失生效指针。
+
+**版本差异审阅**：`GET /api/schemes/{sid}/diff?from_id=&to_id=` 只读对比两个
+冻结快照的切点、密度、插值适用范围与产率（含逐项 Δ）；前端时间线标出生效版本，
+支持只读差异比较与从历史版本发起切换。
+
 **乐观锁**：每次变更携带 `base_revision`，与当前 `revision` 不一致即返回
 `409 REVISION_CONFLICT`，绝不覆盖他人修改；前端弹出冲突提示并可一键载入最新。
 
@@ -83,7 +97,7 @@ python -m uvicorn app.main:app --port 8000
 ### 测试
 
 ```bash
-cd backend && python -m pytest tests/ -q     # 59 个用例
+cd backend && python -m pytest tests/ -q     # 66 个用例
 ```
 
 ## 核心规则
@@ -121,9 +135,12 @@ cd backend && python -m pytest tests/ -q     # 59 个用例
 方案版本化（变更类接口均接受 `Idempotency-Key` 头与 `base_revision`）：
 
 - `POST /api/experiments/{id}/schemes` 新建草稿；`GET .../schemes` 列表（含状态）
-- `GET /api/schemes/{sid}` 工作副本详情 + 版本列表 + 审计时间线
+- `GET /api/schemes/{sid}` 工作副本详情 + 版本列表 + 审计时间线（含生效版本）
 - `PUT /api/schemes/{sid}/draft` 保存草稿
-- `POST /api/schemes/{sid}/submit | approve | withdraw` 状态迁移
+- `POST /api/schemes/{sid}/submit | approve | withdraw` 状态迁移（withdraw 支持 `successor_version_id`）
+- `POST /api/schemes/{sid}/switch-version` 受控切换生效版本
+- `GET /api/schemes/{sid}/current-version` 当前生效版本查询
+- `GET /api/schemes/{sid}/diff?from_id=&to_id=` 两版本差异（切点/密度/插值范围/产率）
 - `GET /api/scheme-versions/{vid}` 版本快照查询；`POST .../copy` 基于版本复制新草稿
 - `GET /api/scheme-versions/{vid}/export?format=json|csv` 冻结导出
 - `GET /api/experiments/{eid}/schemes/{sid}/export` 工作副本实时导出（未冻结）

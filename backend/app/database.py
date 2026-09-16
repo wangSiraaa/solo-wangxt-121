@@ -66,6 +66,26 @@ def ensure_schema() -> None:
             conn.execute(text("ALTER TABLE cut_schemes ADD COLUMN revision INTEGER"))
         if "updated_at" not in cols:
             conn.execute(text(f"ALTER TABLE cut_schemes ADD COLUMN updated_at {dt_type}"))
+        if "active_version_id" not in cols:
+            conn.execute(
+                text("ALTER TABLE cut_schemes ADD COLUMN active_version_id INTEGER")
+            )
         # 旧数据回填为可继续编辑的旧草稿
         conn.execute(text("UPDATE cut_schemes SET status='draft' WHERE status IS NULL"))
         conn.execute(text("UPDATE cut_schemes SET revision=1 WHERE revision IS NULL"))
+        # 已有发布快照但无生效指针的方案：生效版本回填为最新快照
+        conn.execute(
+            text(
+                """
+                UPDATE cut_schemes SET active_version_id = (
+                    SELECT MAX(sv.id) FROM scheme_versions sv
+                    WHERE sv.scheme_id = cut_schemes.id
+                )
+                WHERE active_version_id IS NULL
+                  AND EXISTS (
+                      SELECT 1 FROM scheme_versions sv
+                      WHERE sv.scheme_id = cut_schemes.id
+                  )
+                """
+            )
+        )

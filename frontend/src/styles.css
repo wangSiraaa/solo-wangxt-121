@@ -300,3 +300,42 @@ button.link {
 .version-view {
   border-color: #b7c9e8;
 }
+
+/* ---- 生效版本与差异 ---- */
+.chip-active {
+  background: #dcf3e3;
+  border-color: #7fc79a;
+  color: #1e6b38;
+  font-weight: 600;
+}
+
+.diff-added {
+  background: #ecf8ef;
+}
+
+.diff-removed {
+  background: #fdecea;
+}
+
+.diff-changed {
+  background: #fff7e0;
+}
+
+.delta-up {
+  color: #1e6b38;
+  font-weight: 600;
+}
+
+.delta-down {
+  color: #b3261e;
+  font-weight: 600;
+}
+
+.delta-none {
+  color: #888;
+}
+
+.version-view h3 {
+  font-size: 14px;
+  margin: 14px 0 6px;
+}

@@ -91,6 +91,10 @@ class CutScheme(Base):
     # 旧数据可能为 NULL，代码按 draft / 1 处理，启动迁移会回填
     status: Mapped[str | None] = mapped_column(String(20), nullable=True, default="draft")
     revision: Mapped[int | None] = mapped_column(Integer, nullable=True, default=1)
+    # 当前生效发布版本指针：同一方案可保留多个已发布快照，但只有一个生效。
+    # 普通整型而非外键：避免与 scheme_versions.scheme_id 形成循环依赖，
+    # 指针完整性由应用层（受控切换/发布）保证。
+    active_version_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[datetime | None] = mapped_column(
         DateTime, default=_utcnow, onupdate=_utcnow, nullable=True
